@@ -1,0 +1,18 @@
+{
+  "name": "vercel_agent_course",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.57",
+    "ai": "^7.0.106",
+    "z": "^1.0.9",
+    "zod": "^4.6.5"
+  }
+}
