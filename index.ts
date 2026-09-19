@@ -2,12 +2,18 @@ import { ToolLoopAgent, stepCountIs, tool } from "ai";
 import { z } from "zod";
 import { anthropic } from '@ai-sdk/anthropic';
 import { resolve } from "node:path";
-import { readFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { buildSystemPrompt } from "./src/system";
- 
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 const cwd = process.argv[2] || process.cwd();
  
+const agentsPath = join(cwd, "AGENTS.md");
+const projectContext = existsSync(agentsPath)
+  ? readFileSync(agentsPath, "utf-8")
+  : undefined;
+
 const read = tool({
   description: `Read a file from the project. Returns numbered lines.
  
@@ -197,6 +203,7 @@ const instructions = buildSystemPrompt({
   workingDirectory: cwd,
   sandboxType: "local",
   toolNames: Object.keys({ read, grep, bash }),
+  projectContext,
 });
 
 const agent = new ToolLoopAgent({
