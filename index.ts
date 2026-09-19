@@ -115,11 +115,27 @@ interface BashOperations {
   exec(command: string): Promise<{ stdout: string; exitCode: number }>;
 }
 
-function createBashTool(operations: BashOperations, safePrefixes: string[]) {
-  function isSafe(command: string): boolean {
-    return safePrefixes.some((p) => command.trim().startsWith(p));
-  }
+type ApprovalConfig =
+  | { mode: "interactive" }
+  | { mode: "background" }
+  | { mode: "delegated"; trust: string[] };
  
+function createApproval(config: ApprovalConfig) {
+  return ({ command }: { command: string }) => {
+    if (config.mode === "background") return false;
+ 
+    if (config.mode === "delegated") {
+      return !config.trust.some((p) => command.trim().startsWith(p));
+    }
+ 
+    return !SAFE_PREFIXES.some((p) => command.trim().startsWith(p));
+  };
+}
+
+function createBashTool(
+  operations: BashOperations,
+  needsApproval: (input: { command: string }) => boolean,
+) {
   return tool({
     description: `Execute a shell command in the working directory.
  
@@ -137,7 +153,7 @@ USAGE: command is a single shell string. Commands not in the safe-prefix
       command: z.string().describe("Shell command to execute"),
     }),
     execute: async ({ command }) => {
-      if (!isSafe(command)) {
+      if (needsApproval({ command })) {
         return `Blocked: "${command}" requires approval.`;
       }
       const { stdout } = await operations.exec(command);
@@ -164,7 +180,17 @@ const localOps: BashOperations = {
   },
 };
  
-const bash = createBashTool(localOps, SAFE_PREFIXES);
+// Interactive: human approves anything not on the safe list
+const bash = createBashTool(localOps, createApproval({ mode: "interactive" }));
+ 
+// Background: auto-approve everything (CI, automation)
+// const bash = createBashTool(localOps, createApproval({ mode: "background" }));
+ 
+// Delegated: subagent inherits a trust slice from its parent
+// const bash = createBashTool(
+//   localOps,
+//   createApproval({ mode: "delegated", trust: ["pwd", "find .", "git status"] }),
+// );
 
 const agent = new ToolLoopAgent({
   // model: "anthropic/claude-haiku-4-5",
