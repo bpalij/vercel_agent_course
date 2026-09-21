@@ -48,6 +48,8 @@ export function createBashTool(
   sandbox: Sandbox,
   needsApproval: (input: { command: string }) => boolean,
 ) {
+  const MAX_BASH_CHARS = 5000;
+
   return tool({
     description: `Execute a shell command in the working directory.
  
@@ -68,8 +70,12 @@ USAGE: command is a single shell string. Commands not in the safe-prefix
       if (needsApproval({ command })) {
         return `Blocked: "${command}" requires approval.`;
       }
-      const { stdout } = await sandbox.exec(command);
-      return stdout || "(no output)";
+      const result = await sandbox.exec(command);
+      const stdout = result.stdout || "(no output)";
+      return stdout.length > MAX_BASH_CHARS
+        ? stdout.slice(-MAX_BASH_CHARS) +
+            `\n... (truncated, showing last ${MAX_BASH_CHARS} chars)`
+        : stdout || "(no output)";
     },
   });
 }
@@ -107,15 +113,15 @@ export function createGrepTool(sandbox: Sandbox) {
    
       try {
         const { stdout } = await sandbox.exec(cmd);
-        const lines = stdout.trim().split("\\n").filter(Boolean);
+        const lines = stdout.trim().split("\n").filter(Boolean);
    
         const MAX_MATCHES = 50;
         const truncated = lines.length > MAX_MATCHES;
         const result = truncated ? lines.slice(0, MAX_MATCHES) : lines;
    
         return truncated
-          ? result.join("\\n") + `\\n... (${lines.length} total, showing first ${MAX_MATCHES})`
-          : result.join("\\n") || "No matches found.";
+          ? result.join("\n") + `\n... (${lines.length} total, showing first ${MAX_MATCHES})`
+          : result.join("\n") || "No matches found.";
       } catch (error: any) {
         const stdout = String(error?.stdout || "").trim();
         if (stdout) {
@@ -124,8 +130,8 @@ export function createGrepTool(sandbox: Sandbox) {
           const truncated = lines.length > MAX_MATCHES;
           const result = truncated ? lines.slice(0, MAX_MATCHES) : lines;
           return truncated
-            ? result.join("\\n") + `\\n... (${lines.length} total, showing first ${MAX_MATCHES})`
-            : result.join("\\n");
+            ? result.join("\n") + `\n... (${lines.length} total, showing first ${MAX_MATCHES})`
+            : result.join("\n");
         }
         return "No matches found.";
       }
