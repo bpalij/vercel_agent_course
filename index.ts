@@ -10,6 +10,7 @@ import { createLocalSandbox } from "./src/sandbox-local";
 import { createJustBashSandbox } from "./src/sandbox-just-bash";
 import { createReadTool, createGrepTool, createBashTool } from "./src/tools";
 import type { SandboxLifecycle } from "./src/sandbox";
+import { addCacheControl } from "./src/cache";
 
 const cwd = process.argv[2] || process.cwd();
 
@@ -75,19 +76,23 @@ const agent = new ToolLoopAgent({
   tools,
   stopWhen: stepCountIs(10),
   onStepFinish: ({ usage, stepNumber }) => {
-    console.error(
-      `Step ${stepNumber}: ${usage.inputTokens} input, ${usage.outputTokens} output`,
-    );
-  },
-  prepareCall: async (options) => ({
-    ...options,
-    messages: options.messages
+  console.error(
+    `Step ${stepNumber}: ${usage.inputTokens} input, ${usage.outputTokens} output`
+  );
+},
+  prepareCall: async (options) => {
+    const pruned = options.messages
       ? pruneMessages({
           messages: options.messages,
           toolCalls: "before-last-3-messages",
         })
-      : undefined,
-  }),
+      : undefined;
+  
+    return {
+      ...options,
+      messages: pruned ? addCacheControl(pruned) : undefined,
+    };
+  },
 });
 
 const prompt = process.argv.slice(3).join(" ") || "Hello!";
