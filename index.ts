@@ -1,4 +1,4 @@
-import { ToolLoopAgent, stepCountIs, tool } from "ai";
+import { ToolLoopAgent, stepCountIs, tool, pruneMessages } from "ai";
 import { z } from "zod";
 import { anthropic } from '@ai-sdk/anthropic';
 import { resolve } from "node:path";
@@ -79,6 +79,15 @@ const agent = new ToolLoopAgent({
       `Step ${stepNumber}: ${usage.inputTokens} input, ${usage.outputTokens} output`,
     );
   },
+  prepareCall: async (options) => ({
+    ...options,
+    messages: options.messages
+      ? pruneMessages({
+          messages: options.messages,
+          toolCalls: "before-last-3-messages",
+        })
+      : undefined,
+  }),
 });
 
 const prompt = process.argv.slice(3).join(" ") || "Hello!";
