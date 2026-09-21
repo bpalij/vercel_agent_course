@@ -7,3 +7,9 @@ export interface Sandbox {
   expiresAt?: number;
   snapshot?(): Promise<{ snapshotId: string }>;
 }
+
+export interface SandboxLifecycle {
+  afterStart?(sandbox: Sandbox): Promise<void>;
+  beforeStop?(sandbox: Sandbox): Promise<void>;
+  onTimeout?(sandbox: Sandbox): Promise<void>;
+}

@@ -9,14 +9,24 @@ import { join } from "node:path";
 import { createLocalSandbox } from "./src/sandbox-local";
 import { createJustBashSandbox } from "./src/sandbox-just-bash";
 import { createReadTool, createGrepTool, createBashTool } from "./src/tools";
+import type { SandboxLifecycle } from "./src/sandbox";
 
 const cwd = process.argv[2] || process.cwd();
 
-const sandboxType = process.env.SANDBOX || "local";
-const sandbox =
-  sandboxType === "just-bash"
-    ? await createJustBashSandbox(cwd)
-    : createLocalSandbox(cwd);
+const createSandboxByEnv = async (cwd: string) => {
+  const sandboxType = process.env.SANDBOX || "local";
+  const sandbox =
+    sandboxType === "just-bash"
+      ? await createJustBashSandbox(cwd)
+      : createLocalSandbox(cwd);
+  return sandbox;
+}
+
+const sandbox = await createSandboxByEnv(cwd);
+const lifecycle: SandboxLifecycle = {};
+ 
+await lifecycle.afterStart?.(sandbox);
+
 
 const SAFE_PREFIXES = [
   "ls", "cat", "echo", "pwd", "which", "find",
@@ -67,6 +77,11 @@ const agent = new ToolLoopAgent({
 });
 
 const prompt = process.argv.slice(3).join(" ") || "Hello!";
-const { text, steps } = await agent.generate({ prompt });
-console.log(text);
-console.log(`\n(${steps.length} steps)`);
+try {
+  const { text, steps } = await agent.generate({ prompt });
+  console.log(text);
+  console.log(`\n(${steps.length} steps)`);
+} finally {
+  await lifecycle.beforeStop?.(sandbox);
+  await sandbox.stop();
+}
