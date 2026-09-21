@@ -12,6 +12,7 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.57",
     "ai": "^7.0.106",
+    "just-bash": "^3.4.2",
     "z": "^1.0.9",
     "zod": "^4.6.5"
   }

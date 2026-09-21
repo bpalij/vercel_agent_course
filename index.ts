@@ -7,11 +7,16 @@ import { buildSystemPrompt } from "./src/system";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createLocalSandbox } from "./src/sandbox-local";
+import { createJustBashSandbox } from "./src/sandbox-just-bash";
 import { createReadTool, createGrepTool, createBashTool } from "./src/tools";
 
 const cwd = process.argv[2] || process.cwd();
 
-const sandbox = createLocalSandbox(cwd);
+const sandboxType = process.env.SANDBOX || "local";
+const sandbox =
+  sandboxType === "just-bash"
+    ? await createJustBashSandbox(cwd)
+    : createLocalSandbox(cwd);
 
 const SAFE_PREFIXES = [
   "ls", "cat", "echo", "pwd", "which", "find",
