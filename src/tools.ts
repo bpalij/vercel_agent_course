@@ -2,10 +2,12 @@ import { ToolLoopAgent, stepCountIs, tool } from "ai";
 import type { Sandbox } from "./sandbox";
 import { z } from "zod";
 import { resolve } from "node:path";
+import { anthropic } from '@ai-sdk/anthropic';
 
 const cwd = process.argv[2] || process.cwd();
 
 export function createReadTool(sandbox: Sandbox) {
+  // Lesson 1: Basic Tools - read tool
   return tool({
     description: `Read a file from the project. Returns numbered lines.
    
@@ -72,6 +74,7 @@ export function createBashTool(
 ) {
   const MAX_BASH_CHARS = 5000;
 
+  // Lesson 2: Command Execution - bash tool
   return tool({
     description: `Execute a shell command in the working directory.
  
@@ -103,6 +106,7 @@ USAGE: command is a single shell string. Commands not in the safe-prefix
 }
 
 export function createGrepTool(sandbox: Sandbox) {
+  // Lesson 3: Code Search - grep tool
   return tool({
     description: `Search file contents using regex. Returns matching lines with file paths.
    
@@ -161,18 +165,61 @@ export function createGrepTool(sandbox: Sandbox) {
   });
 }
 
+function buildExplorer(sandbox: Sandbox, parentTools: { read: any; grep: any }) {
+  return new ToolLoopAgent({
+    // model: "anthropic/claude-haiku-4-5",
+    model: anthropic("claude-haiku-4-5-20251001"),
+    instructions: `You are an explorer agent. Investigate and report back concisely.
+Working directory: ${sandbox.workingDirectory}`,
+    tools: { read: parentTools.read, grep: parentTools.grep },
+    stopWhen: stepCountIs(5),
+  });
+}
+ 
+function buildExecutor(sandbox: Sandbox, parentTools: { read: any; grep: any }) {
+  const executorBash = createBashTool(
+    sandbox,
+    createApproval({
+      mode: "delegated",
+      trust: ["npm test", "npm run build", "npx tsc"],
+    }),
+  );
+  return new ToolLoopAgent({
+    // model: "anthropic/claude-sonnet-4-6",
+    model: anthropic('claude-sonnet-5'),
+    instructions: `You are an executor agent. Follow instructions precisely.
+Working directory: ${sandbox.workingDirectory}
+Do NOT ask questions. Do NOT explore beyond what's needed. Execute the task.`,
+    tools: { read: parentTools.read, grep: parentTools.grep, bash: executorBash },
+    stopWhen: stepCountIs(15),
+  });
+}
+ 
+async function runSubagent(role: string, agent: ToolLoopAgent<never, any, any, any>, description: string) {
+  try {
+    const { text, steps } = await agent.generate({ prompt: description });
+    return text ? `[${role}: ${steps.length} steps]\n${text}` : `(no response from ${role})`;
+  } catch (e: any) {
+    return `${role} error: ${e.message}`;
+  }
+}
+ 
 export function createTaskTool(
   sandbox: Sandbox,
   parentTools: { read: any; grep: any },
 ) {
+  // Lesson 4: Subagents - task tool
   return tool({
     description: `Delegate work to a subagent.
-Explorer (default): read-only research with a fast model.
-Executor: implementation with a stronger model and delegated trust on bash.
+Explorer (default): read-only research with Haiku. Use for searching across files,
+  understanding patterns, and gathering context.
+Executor: implementation with Sonnet and delegated bash. Use for focused
+  changes with explicit instructions and a known verification step.
  
 WHEN TO USE: research across many files (explorer), bulk implementation (executor).
-WHEN NOT TO USE: ambiguous requirements (use askUser),
-  architectural decisions (the parent decides).`,
+WHEN NOT TO USE: ambiguous requirements (use askUser), architectural decisions
+  (the parent decides).
+DO NOT USE FOR: single-step tasks the parent can do directly.`,
     inputSchema: z.object({
       description: z.string().describe("Task instructions for the subagent"),
       subagentType: z
@@ -181,54 +228,11 @@ WHEN NOT TO USE: ambiguous requirements (use askUser),
         .describe("Subagent role"),
     }),
     execute: async ({ description, subagentType }) => {
-      if (subagentType === "executor") {
-        const executorBash = createBashTool(
-          sandbox,
-          createApproval({
-            mode: "delegated",
-            trust: ["npm test", "npm run build", "npx tsc"],
-          }),
-        );
- 
-        const executor = new ToolLoopAgent({
-          model: "anthropic/claude-sonnet-4-6",
-          instructions: `You are an executor agent. Follow instructions precisely.
-Working directory: ${sandbox.workingDirectory}
-Do NOT ask questions. Do NOT explore beyond what's needed. Execute the task.`,
-          tools: {
-            read: parentTools.read,
-            grep: parentTools.grep,
-            bash: executorBash,
-          },
-          stopWhen: stepCountIs(15),
-        });
- 
-        try {
-          const { text, steps } = await executor.generate({ prompt: description });
-          return text
-            ? `[Executor: ${steps.length} steps]\n${text}`
-            : "(no response from executor)";
-        } catch (e: any) {
-          return `Executor error: ${e.message}`;
-        }
-      }
- 
-      const explorer = new ToolLoopAgent({
-        model: "anthropic/claude-haiku-4-5",
-        instructions: `You are an explorer agent. Investigate and report back concisely.
-Working directory: ${sandbox.workingDirectory}`,
-        tools: { read: parentTools.read, grep: parentTools.grep },
-        stopWhen: stepCountIs(5),
-      });
- 
-      try {
-        const { text, steps } = await explorer.generate({ prompt: description });
-        return text
-          ? `[Explorer: ${steps.length} steps]\n${text}`
-          : "(no response from explorer)";
-      } catch (e: any) {
-        return `Explorer error: ${e.message}`;
-      }
+      const agent =
+        subagentType === "executor"
+          ? buildExecutor(sandbox, parentTools)
+          : buildExplorer(sandbox, parentTools);
+      return runSubagent(subagentType, agent, description);
     },
   });
 }
