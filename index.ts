@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createLocalSandbox } from "./src/sandbox-local";
 import { createJustBashSandbox } from "./src/sandbox-just-bash";
-import { createReadTool, createGrepTool, createBashTool, createTaskTool } from "./src/tools";
+import { createReadTool, createGrepTool, createBashTool, createTaskTool, createApproval } from "./src/tools";
 import type { SandboxLifecycle } from "./src/sandbox";
 import { addCacheControl } from "./src/cache";
 
@@ -27,29 +27,6 @@ const sandbox = await createSandboxByEnv(cwd);
 const lifecycle: SandboxLifecycle = {};
  
 await lifecycle.afterStart?.(sandbox);
-
-
-const SAFE_PREFIXES = [
-  "ls", "cat", "echo", "pwd", "which", "find",
-  "head", "tail", "wc", "git log", "git status", "git diff",
-];
-
-type ApprovalConfig =
-  | { mode: "interactive" }
-  | { mode: "background" }
-  | { mode: "delegated"; trust: string[] };
-
-function createApproval(config: ApprovalConfig) {
-  return ({ command }: { command: string }) => {
-    if (config.mode === "background") return false;
- 
-    if (config.mode === "delegated") {
-      return !config.trust.some((p) => command.trim().startsWith(p));
-    }
- 
-    return !SAFE_PREFIXES.some((p) => command.trim().startsWith(p));
-  };
-}
 
 const tools = {
   read: createReadTool(sandbox),
