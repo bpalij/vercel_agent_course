@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createLocalSandbox } from "./src/sandbox-local";
 import { createJustBashSandbox } from "./src/sandbox-just-bash";
-import { createReadTool, createGrepTool, createBashTool } from "./src/tools";
+import { createReadTool, createGrepTool, createBashTool, createTaskTool } from "./src/tools";
 import type { SandboxLifecycle } from "./src/sandbox";
 import { addCacheControl } from "./src/cache";
 
@@ -56,6 +56,11 @@ const tools = {
   grep: createGrepTool(sandbox),
   bash: createBashTool(sandbox, createApproval({ mode: "interactive" })),
 };
+
+const tools_with_task = {
+  ...tools,
+  task: createTaskTool(sandbox, { read: tools.read, grep: tools.grep }),
+};
  
 const agentsPath = join(cwd, "AGENTS.md");
 const projectContext = existsSync(agentsPath)
@@ -73,7 +78,7 @@ const agent = new ToolLoopAgent({
   // model: "anthropic/claude-haiku-4-5",
   model: anthropic("claude-haiku-4-5-20251001"),
   instructions,
-  tools,
+  tools: tools_with_task,
   stopWhen: stepCountIs(10),
   onStepFinish: ({ usage, stepNumber }) => {
   console.error(
