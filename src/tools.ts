@@ -1,4 +1,4 @@
-import { ToolLoopAgent, stepCountIs, tool } from "ai";
+import { ToolLoopAgent, stepCountIs, tool, pruneMessages } from "ai";
 import type { Sandbox } from "./sandbox";
 import { z } from "zod";
 import { resolve } from "node:path";
@@ -7,7 +7,6 @@ import { anthropic } from '@ai-sdk/anthropic';
 const cwd = process.argv[2] || process.cwd();
 
 export function createReadTool(sandbox: Sandbox) {
-  // Lesson 1: Basic Tools - read tool
   return tool({
     description: `Read a file from the project. Returns numbered lines.
    
@@ -35,15 +34,22 @@ export function createReadTool(sandbox: Sandbox) {
       if (limit) lines = lines.slice(0, limit);
    
       const MAX_LINES = 500;
-      const truncated = lines.length > MAX_LINES;
-      if (truncated) lines = lines.slice(0, MAX_LINES);
+      const MAX_CHARS = 12000;
+      const truncatedLines = lines.length > MAX_LINES;
+      if (truncatedLines) lines = lines.slice(0, MAX_LINES);
    
       const numbered = lines.map((l, i) => `${(offset || 1) + i}: ${l}`);
-      return truncated
+      let output = truncatedLines
         ? numbered.join("\n") + `\n... (truncated at ${MAX_LINES} lines)`
         : numbered.join("\n");
+
+      if (output.length > MAX_CHARS) {
+        output = output.slice(0, MAX_CHARS) + `\n... (truncated at ${MAX_CHARS} characters)`;
+      }
+
+      return output;
     },
-  });;
+  });
 }
 
 const SAFE_PREFIXES = [
@@ -74,7 +80,6 @@ export function createBashTool(
 ) {
   const MAX_BASH_CHARS = 5000;
 
-  // Lesson 2: Command Execution - bash tool
   return tool({
     description: `Execute a shell command in the working directory.
  
@@ -106,7 +111,6 @@ USAGE: command is a single shell string. Commands not in the safe-prefix
 }
 
 export function createGrepTool(sandbox: Sandbox) {
-  // Lesson 3: Code Search - grep tool
   return tool({
     description: `Search file contents using regex. Returns matching lines with file paths.
    
@@ -167,12 +171,20 @@ export function createGrepTool(sandbox: Sandbox) {
 
 function buildExplorer(sandbox: Sandbox, parentTools: { read: any; grep: any }) {
   return new ToolLoopAgent({
-    // model: "anthropic/claude-haiku-4-5",
     model: anthropic("claude-haiku-4-5-20251001"),
     instructions: `You are an explorer agent. Investigate and report back concisely.
 Working directory: ${sandbox.workingDirectory}`,
     tools: { read: parentTools.read, grep: parentTools.grep },
     stopWhen: stepCountIs(5),
+    prepareCall: async (options) => ({
+      ...options,
+      messages: options.messages
+        ? pruneMessages({
+            messages: options.messages,
+            toolCalls: "before-last-2-messages",
+          })
+        : undefined,
+    }),
   });
 }
  
@@ -185,20 +197,34 @@ function buildExecutor(sandbox: Sandbox, parentTools: { read: any; grep: any }) 
     }),
   );
   return new ToolLoopAgent({
-    // model: "anthropic/claude-sonnet-4-6",
     model: anthropic('claude-sonnet-5'),
     instructions: `You are an executor agent. Follow instructions precisely.
 Working directory: ${sandbox.workingDirectory}
 Do NOT ask questions. Do NOT explore beyond what's needed. Execute the task.`,
     tools: { read: parentTools.read, grep: parentTools.grep, bash: executorBash },
     stopWhen: stepCountIs(15),
+    prepareCall: async (options) => ({
+      ...options,
+      messages: options.messages
+        ? pruneMessages({
+            messages: options.messages,
+            toolCalls: "before-last-2-messages",
+          })
+        : undefined,
+    }),
   });
 }
  
 async function runSubagent(role: string, agent: ToolLoopAgent<never, any, any, any>, description: string) {
   try {
     const { text, steps } = await agent.generate({ prompt: description });
-    return text ? `[${role}: ${steps.length} steps]\n${text}` : `(no response from ${role})`;
+    const MAX_SUBAGENT_RETURN_CHARS = 4000;
+    let output = text ? `[${role}: ${steps.length} steps]\n${text}` : `(no response from ${role})`;
+    
+    if (output.length > MAX_SUBAGENT_RETURN_CHARS) {
+      output = output.slice(0, MAX_SUBAGENT_RETURN_CHARS) + `\n... (subagent output truncated)`;
+    }
+    return output;
   } catch (e: any) {
     return `${role} error: ${e.message}`;
   }
@@ -208,7 +234,6 @@ export function createTaskTool(
   sandbox: Sandbox,
   parentTools: { read: any; grep: any },
 ) {
-  // Lesson 4: Subagents - task tool
   return tool({
     description: `Delegate work to a subagent.
 Explorer (default): read-only research with Haiku. Use for searching across files,
