@@ -39,6 +39,16 @@ After making changes, verify your work:
 Do NOT claim "tests pass" without running them.
 Scope your claims honestly. "Verification was limited because writes were blocked" is honest.
 "All tests pass" when you didn't run them is not.`);
+
+  sections.push(`
+# Handling Ambiguity
+When the task is ambiguous or has multiple valid approaches:
+1. Search the code or docs to gather context first
+2. Use askUser to let the user choose. Do NOT guess.
+3. Examples: "add auth" -> ask OAuth or JWT; "set up a db" -> ask Postgres or SQLite
+ 
+Specific tasks (with file paths, line numbers, or precise instructions) do not
+need askUser. Act directly.`);
  
   if (ctx.projectContext) {
     sections.push(`
