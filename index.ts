@@ -19,6 +19,7 @@ import {
 } from "./src/tools";
 import type { SandboxLifecycle } from "./src/sandbox";
 import { addCacheControl } from "./src/cache";
+import { discoverGates } from "./src/verification";
 
 const cwd = process.argv[2] || process.cwd();
 
@@ -54,11 +55,14 @@ const projectContext = existsSync(agentsPath)
   ? readFileSync(agentsPath, "utf-8")
   : undefined;
 
-const instructions = buildSystemPrompt({
+  const verificationCommands = await discoverGates(sandbox);
+
+  const instructions = buildSystemPrompt({
   workingDirectory: cwd,
   sandboxType: "local",
   toolNames: Object.keys(tools),
   projectContext,
+  verificationCommands,
 });
 
 const agent = new ToolLoopAgent({
