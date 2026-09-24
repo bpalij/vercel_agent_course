@@ -14,7 +14,8 @@ import {
   createBashTool,
   createTaskTool,
   createApproval,
-  createAskUserTool
+  createAskUserTool,
+  createTodoTool,
 } from "./src/tools";
 import type { SandboxLifecycle } from "./src/sandbox";
 import { addCacheControl } from "./src/cache";
@@ -40,6 +41,7 @@ const tools = {
   grep: createGrepTool(sandbox),
   bash: createBashTool(sandbox, createApproval({ mode: "interactive" })),
   askUser: createAskUserTool(),
+  todo: createTodoTool(),
 };
 
 const tools_with_task = {
