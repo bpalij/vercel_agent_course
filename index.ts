@@ -1,81 +1,74 @@
-import { ToolLoopAgent, stepCountIs, tool, pruneMessages } from "ai";
-import { z } from "zod";
-import { anthropic } from '@ai-sdk/anthropic';
+import { parseArgs } from "node:util";
+import { ToolLoopAgent, stepCountIs, pruneMessages } from "ai";
 import { resolve } from "node:path";
-import { execSync } from "node:child_process";
-import { buildSystemPrompt } from "./src/system";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createLocalSandbox } from "./src/sandbox-local";
 import { createJustBashSandbox } from "./src/sandbox-just-bash";
+import { buildSystemPrompt } from "./src/system";
 import {
   createReadTool,
   createGrepTool,
   createBashTool,
   createTaskTool,
-  createApproval,
   createAskUserTool,
   createTodoTool,
 } from "./src/tools";
-import type { SandboxLifecycle } from "./src/sandbox";
+import { createApproval } from "./src/approval";
 import { addCacheControl } from "./src/cache";
 import { discoverGates } from "./src/verification";
-
-const cwd = process.argv[2] || process.cwd();
-
-const createSandboxByEnv = async (cwd: string) => {
-  const sandboxType = process.env.SANDBOX || "local";
-  const sandbox =
-    sandboxType === "just-bash"
-      ? await createJustBashSandbox(cwd)
-      : createLocalSandbox(cwd);
-  return sandbox;
-}
-
-const sandbox = await createSandboxByEnv(cwd);
-const lifecycle: SandboxLifecycle = {};
+import type { Sandbox } from "./src/sandbox";
+import { anthropic } from '@ai-sdk/anthropic';
  
-await lifecycle.afterStart?.(sandbox);
-
-const tools = {
+const { values, positionals } = parseArgs({
+  args: process.argv.slice(2),
+  options: {
+    sandbox: { type: "string", default: "local" },
+    model: { type: "string", default: "" },
+  },
+  allowPositionals: true,
+});
+ 
+const cwd = resolve(positionals[0] || process.cwd());
+const prompt = positionals.slice(1).join(" ") || "Hello!";
+ 
+async function sandboxFromFlag(name: string, dir: string): Promise<Sandbox> {
+  if (name === "just-bash") return createJustBashSandbox(dir);
+  return createLocalSandbox(dir);
+}
+ 
+const sandbox = await sandboxFromFlag(values.sandbox!, cwd);
+console.error(`Sandbox: ${sandbox.type}`);
+ 
+const projectContext = existsSync(join(cwd, "AGENTS.md"))
+  ? readFileSync(join(cwd, "AGENTS.md"), "utf-8")
+  : undefined;
+ 
+const verificationCommands = await discoverGates(sandbox);
+ 
+const baseTools = {
   read: createReadTool(sandbox),
   grep: createGrepTool(sandbox),
   bash: createBashTool(sandbox, createApproval({ mode: "interactive" })),
+};
+const tools = {
+  ...baseTools,
+  task: createTaskTool(sandbox, { read: baseTools.read, grep: baseTools.grep }),
   askUser: createAskUserTool(),
   todo: createTodoTool(),
 };
-
-const tools_with_task = {
-  ...tools,
-  task: createTaskTool(sandbox, { read: tools.read, grep: tools.grep }),
-};
  
-const agentsPath = join(cwd, "AGENTS.md");
-const projectContext = existsSync(agentsPath)
-  ? readFileSync(agentsPath, "utf-8")
-  : undefined;
-
-  const verificationCommands = await discoverGates(sandbox);
-
-  const instructions = buildSystemPrompt({
-  workingDirectory: cwd,
-  sandboxType: "local",
-  toolNames: Object.keys(tools),
-  projectContext,
-  verificationCommands,
-});
-
 const agent = new ToolLoopAgent({
-  // model: "anthropic/claude-haiku-4-5",
-  model: anthropic("claude-haiku-4-5-20251001"),
-  instructions,
-  tools: tools_with_task,
-  stopWhen: stepCountIs(10),
-  onStepFinish: ({ usage, stepNumber }) => {
-  console.error(
-    `Step ${stepNumber}: ${usage.inputTokens} input, ${usage.outputTokens} output`
-  );
-},
+  model: values.model || anthropic("claude-haiku-4-5-20251001"),
+  instructions: buildSystemPrompt({
+    workingDirectory: cwd,
+    sandboxType: sandbox.type,
+    toolNames: Object.keys(tools),
+    projectContext,
+    verificationCommands,
+  }),
+  tools,
+  stopWhen: stepCountIs(15),
   prepareCall: async (options) => {
     const pruned = options.messages
       ? pruneMessages({
@@ -83,20 +76,28 @@ const agent = new ToolLoopAgent({
           toolCalls: "before-last-3-messages",
         })
       : undefined;
-  
     return {
       ...options,
       messages: pruned ? addCacheControl(pruned) : undefined,
     };
   },
+  onStepFinish: ({ usage, stepNumber }) => {
+    console.error(
+      `Step ${stepNumber}: ${usage.inputTokens} input, ${usage.outputTokens} output`,
+    );
+  },
 });
-
-const prompt = process.argv.slice(3).join(" ") || "Hello!";
+ 
+process.on("SIGINT", async () => {
+  console.error("\nShutting down...");
+  await sandbox.stop();
+  process.exit(0);
+});
+ 
 try {
   const { text, steps } = await agent.generate({ prompt });
   console.log(text);
   console.log(`\n(${steps.length} steps)`);
 } finally {
-  await lifecycle.beforeStop?.(sandbox);
   await sandbox.stop();
 }

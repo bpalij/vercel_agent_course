@@ -3,6 +3,7 @@ import type { Sandbox } from "./sandbox";
 import { z } from "zod";
 import { resolve } from "node:path";
 import { anthropic } from '@ai-sdk/anthropic';
+import { createApproval } from "./approval";
 
 const cwd = process.argv[2] || process.cwd();
 
@@ -52,27 +53,7 @@ export function createReadTool(sandbox: Sandbox) {
   });
 }
 
-const SAFE_PREFIXES = [
-  "ls", "cat", "echo", "pwd", "which", "find",
-  "head", "tail", "wc", "git log", "git status", "git diff",
-];
 
-type ApprovalConfig =
-  | { mode: "interactive" }
-  | { mode: "background" }
-  | { mode: "delegated"; trust: string[] };
-
-export function createApproval(config: ApprovalConfig) {
-  return ({ command }: { command: string }) => {
-    if (config.mode === "background") return false;
- 
-    if (config.mode === "delegated") {
-      return !config.trust.some((p) => command.trim().startsWith(p));
-    }
- 
-    return !SAFE_PREFIXES.some((p) => command.trim().startsWith(p));
-  };
-}
 
 export function createBashTool(
   sandbox: Sandbox,
