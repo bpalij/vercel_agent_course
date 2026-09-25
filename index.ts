@@ -95,9 +95,31 @@ process.on("SIGINT", async () => {
 });
  
 try {
-  const { text, steps } = await agent.generate({ prompt });
-  console.log(text);
-  console.log(`\n(${steps.length} steps)`);
+  const result = await agent.stream({ prompt });
+
+  // fullStream is marked deprecated in AI SDK in favor of UI streams, but required for CLI streaming
+  for await (const chunk of result.fullStream) {
+    switch (chunk.type) {
+      case "text-delta":
+        process.stdout.write(chunk.text); // Changed from chunk.textDelta
+        break;
+      case "tool-call":
+        console.error(
+          `\n[tool] \(${chunk.toolName}(\)${JSON.stringify(chunk.input)})`, // Changed from chunk.args
+        );
+        break;
+      case "tool-result": {
+        const preview =
+          typeof chunk.output === "string" // Changed from chunk.result
+            ? chunk.output.slice(0, 100)    // Changed from chunk.result
+            : JSON.stringify(chunk.output).slice(0, 100); // Changed from chunk.result
+        console.error(`  -> ${preview}`);
+        break;
+      }
+    }
+  }
+  
+  console.log();
 } finally {
   await sandbox.stop();
 }
