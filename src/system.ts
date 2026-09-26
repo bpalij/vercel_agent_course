@@ -5,6 +5,7 @@ export interface PromptContext {
   gitBranch?: string;
   projectContext?: string;
   verificationCommands?: string[];
+  skills?: { name: string; description: string }[];
 }
 
 export function buildSystemPrompt(ctx: PromptContext): string {
@@ -30,6 +31,16 @@ export function buildSystemPrompt(ctx: PromptContext): string {
 - Prefer simple, minimal changes
 - Search before creating, and reuse existing patterns
 - No new dependencies without asking`);
+
+  if (ctx.skills?.length) {
+    const lines = ctx.skills
+      .map((s) => `- ${s.name}: ${s.description}`)
+      .join("\n");
+    sections.push(`
+  # Skills
+  The following skills are available. Call \`loadSkill\` with the name to get full content.
+  ${lines}`);
+  }
 
   const gates = ctx.verificationCommands?.length
     ? ctx.verificationCommands.map((c, i) => `${i + 1}. \`${c}\``).join("\n")

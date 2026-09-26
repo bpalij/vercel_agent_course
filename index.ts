@@ -13,12 +13,14 @@ import {
   createTaskTool,
   createAskUserTool,
   createTodoTool,
+  createLoadSkillTool,
 } from "./src/tools";
 import { createApproval } from "./src/approval";
 import { addCacheControl } from "./src/cache";
 import { discoverGates } from "./src/verification";
 import type { Sandbox } from "./src/sandbox";
 import { anthropic } from '@ai-sdk/anthropic';
+import { discoverSkills } from "./src/skills";
  
 const { values, positionals } = parseArgs({
   args: process.argv.slice(2),
@@ -31,6 +33,12 @@ const { values, positionals } = parseArgs({
  
 const cwd = resolve(positionals[0] || process.cwd());
 const prompt = positionals.slice(1).join(" ") || "Hello!";
+
+const skillDirs = [
+  join(cwd, "skills"),
+  join(process.env.HOME ?? "", ".harness", "skills"),
+];
+const skills = discoverSkills(skillDirs);
  
 async function sandboxFromFlag(name: string, dir: string): Promise<Sandbox> {
   if (name === "just-bash") return createJustBashSandbox(dir);
@@ -56,6 +64,7 @@ const tools = {
   task: createTaskTool(sandbox, { read: baseTools.read, grep: baseTools.grep }),
   askUser: createAskUserTool(),
   todo: createTodoTool(),
+  loadSkill: createLoadSkillTool(skills),
 };
  
 const agent = new ToolLoopAgent({
@@ -66,6 +75,7 @@ const agent = new ToolLoopAgent({
     toolNames: Object.keys(tools),
     projectContext,
     verificationCommands,
+    skills: skills.map((s) => ({ name: s.name, description: s.description })),
   }),
   tools,
   stopWhen: stepCountIs(15),

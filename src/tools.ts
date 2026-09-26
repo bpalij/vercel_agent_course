@@ -4,6 +4,8 @@ import { z } from "zod";
 import { resolve } from "node:path";
 import { anthropic } from '@ai-sdk/anthropic';
 import { createApproval } from "./approval";
+import { readFileSync } from "node:fs";
+import type { Skill } from "./skills";
 
 const cwd = process.argv[2] || process.cwd();
 
@@ -322,6 +324,30 @@ DO NOT USE FOR: status updates to the user (just answer them directly).`,
       return todos
         .map((t) => `[${t.state}] ${t.id}: ${t.description}`)
         .join("\n") || "No todos.";
+    },
+  });
+}
+
+export function createLoadSkillTool(skills: Skill[]) {
+  const MAX_SKILL_CHARS = 4000;
+  const byName = new Map(skills.map((s) => [s.name, s]));
+ 
+  return tool({
+    description: `Load the full content of a skill.
+WHEN TO USE: the task touches a domain you have a skill for (auth, db, testing,
+  deployment, etc.). Check the # Skills section in your instructions.
+WHEN NOT TO USE: tasks unrelated to any available skill.
+DO NOT USE FOR: tasks where the skill name is not in the listed skills.`,
+    inputSchema: z.object({
+      name: z.string().describe("Skill name as listed in the Skills section"),
+    }),
+    execute: async ({ name }) => {
+      const skill = byName.get(name);
+      if (!skill) return `Unknown skill: ${name}`;
+      const content = readFileSync(skill.path, "utf-8");
+      return content.length > MAX_SKILL_CHARS
+        ? content.slice(0, MAX_SKILL_CHARS) + `\n... (truncated at ${MAX_SKILL_CHARS} chars)`
+        : content;
     },
   });
 }
