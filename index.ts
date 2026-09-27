@@ -6,21 +6,14 @@ import { join } from "node:path";
 import { createLocalSandbox } from "./src/sandbox-local";
 import { createJustBashSandbox } from "./src/sandbox-just-bash";
 import { buildSystemPrompt } from "./src/system";
-import {
-  createReadTool,
-  createGrepTool,
-  createBashTool,
-  createTaskTool,
-  createAskUserTool,
-  createTodoTool,
-  createLoadSkillTool,
-} from "./src/tools";
-import { createApproval } from "./src/approval";
 import { addCacheControl } from "./src/cache";
 import { discoverGates } from "./src/verification";
 import type { Sandbox } from "./src/sandbox";
 import { anthropic } from '@ai-sdk/anthropic';
 import { discoverSkills } from "./src/skills";
+import { createRegistry, registerBuiltins, wrapTool } from "./src/registry";
+import { tool } from "ai";
+import { z } from "zod";
  
 const { values, positionals } = parseArgs({
   args: process.argv.slice(2),
@@ -47,6 +40,38 @@ async function sandboxFromFlag(name: string, dir: string): Promise<Sandbox> {
  
 const sandbox = await sandboxFromFlag(values.sandbox!, cwd);
 console.error(`Sandbox: ${sandbox.type}`);
+
+const registry = createRegistry();
+registerBuiltins(registry, sandbox, skills);
+
+registry.register("now", tool({
+  description: "Return the current timestamp",
+  inputSchema: z.object({}),
+  execute: async () => new Date().toISOString(),
+}));
+ 
+registry.register("deploy", tool({
+  description: `Deploy the project to a target environment.
+WHEN TO USE: pushing changes to staging or production.
+WHEN NOT TO USE: testing changes (use bash with the test runner instead).`,
+  inputSchema: z.object({
+    environment: z.enum(["staging", "production"]),
+  }),
+  execute: async ({ environment }) => {
+    const { stdout } = await sandbox.exec(`vercel deploy --${environment}`);
+    return stdout;
+  },
+}));
+
+const baseBash = registry.get("bash")!;
+registry.register("bash", wrapTool(baseBash, {
+  beforeExecute: (input) => {
+    if (input.command.startsWith("bun test")) {
+      return { ...input, command: input.command + " --reporter=spec" };
+    }
+    return input;
+  },
+}));
  
 const projectContext = existsSync(join(cwd, "AGENTS.md"))
   ? readFileSync(join(cwd, "AGENTS.md"), "utf-8")
@@ -54,30 +79,17 @@ const projectContext = existsSync(join(cwd, "AGENTS.md"))
  
 const verificationCommands = await discoverGates(sandbox);
  
-const baseTools = {
-  read: createReadTool(sandbox),
-  grep: createGrepTool(sandbox),
-  bash: createBashTool(sandbox, createApproval({ mode: "interactive" })),
-};
-const tools = {
-  ...baseTools,
-  task: createTaskTool(sandbox, { read: baseTools.read, grep: baseTools.grep }),
-  askUser: createAskUserTool(),
-  todo: createTodoTool(),
-  loadSkill: createLoadSkillTool(skills),
-};
- 
 const agent = new ToolLoopAgent({
   model: values.model || anthropic("claude-haiku-4-5-20251001"),
   instructions: buildSystemPrompt({
     workingDirectory: cwd,
     sandboxType: sandbox.type,
-    toolNames: Object.keys(tools),
+    toolNames: registry.list(),
     projectContext,
     verificationCommands,
     skills: skills.map((s) => ({ name: s.name, description: s.description })),
   }),
-  tools,
+  tools: Object.fromEntries(registry.entries()),
   stopWhen: stepCountIs(15),
   prepareCall: async (options) => {
     const pruned = options.messages
